@@ -65,18 +65,20 @@
     <script type="importmap">
     {
         "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
         }
     }
     </script>
 
     <script type="module">
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // ========================================
         // グローバル変数
         // ========================================
-        let scene, camera, renderer, particles;
+        let scene, camera, renderer, particles, controls;
         let isWalking = false;
         let isStill = true;
         let stillTimer = 0;
@@ -91,13 +93,7 @@
         const originalPositions = [];
         const velocities = [];
         const particleStates = []; // 各パーティクルの状態（0: 山の一部, 1: 放出中）
-        const baseOpacity = 0.8;
-
-        // 状態管理
-        let targetOpacity = baseOpacity;
-        let currentOpacity = baseOpacity;
-        let disperseAmount = 0; // 拡散度合い (0-1)
-        const RELEASE_RATE = 50; // 1フレームあたりランダムに放出される点の数
+        const RELEASE_RATE = 80; // 1フレームあたりランダムに放出される点の数（噴火は激しく）
 
         // ========================================
         // three.js初期化
@@ -125,6 +121,13 @@
 
             // 点群生成
             createMountainPoints();
+
+            // OrbitControls（3D回転操作）
+            controls = new OrbitControls(camera, canvas);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.enableZoom = true;
+            controls.enablePan = false;
 
             // リサイズ対応
             window.addEventListener('resize', onResize);
@@ -166,12 +169,14 @@
 
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-            // マテリアル
+            // マテリアル（火山灰イメージ）
             const material = new THREE.PointsMaterial({
                 color: 0xffffff,
-                size: 0.03,
-                transparent: false,
-                depthWrite: false
+                size: 0.04,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
             });
 
             particles = new THREE.Points(geometry, material);
@@ -233,7 +238,7 @@
                     if (particleStates[randomIndex] === 0) {
                         particleStates[randomIndex] = 1; // 放出状態にする
 
-                        // 放出時の初速度を与える（全方向に拡散・噴火イメージ）
+                        // 放出時の初速度を与える（噴火で上方向へ舞い上がる）
                         const vel = velocities[randomIndex];
                         const i3 = randomIndex * 3;
 
@@ -242,18 +247,11 @@
                         const py = positions[i3 + 1];
                         const pz = positions[i3 + 2];
 
-                        // 山の中心からの方向ベクトル
-                        const centerY = 2.0; // 山の中心高さ
-                        const dx = px;
-                        const dy = py - centerY;
-                        const dz = pz;
-                        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-
-                        // 放射状に拡散（外側へ）
-                        const spreadPower = 0.03 + Math.random() * 0.03;
-                        vel.x = (dx / dist) * spreadPower;
-                        vel.y = (dy / dist) * spreadPower + 0.02; // 少し上方向にバイアス
-                        vel.z = (dz / dist) * spreadPower;
+                        // 上方向メインで、少し横方向にもランダムに散る（火山灰イメージ）
+                        const upwardPower = 0.08 + Math.random() * 0.05; // 強めの上昇
+                        vel.y = upwardPower;
+                        vel.x = (Math.random() - 0.5) * 0.03; // 横方向の散り
+                        vel.z = (Math.random() - 0.5) * 0.03;
                     }
                 }
             } else if (isStill) {
@@ -271,16 +269,18 @@
                 const state = particleStates[i];
 
                 if (state === 1) {
-                    // 放出中：慣性で拡散し続ける（噴火のふわっと感）
-                    // ランダムな微小変化を加える
-                    vel.x += (Math.random() - 0.5) * 0.001;
-                    vel.y += (Math.random() - 0.5) * 0.001;
-                    vel.z += (Math.random() - 0.5) * 0.001;
+                    // 放出中：火山灰のように上昇しながら横に流れる
+                    // 重力に逆らって上昇（徐々に減速）
+                    vel.y -= 0.0008; // 重力の影響（緩やか）
+
+                    // 横方向に風で流される感じ
+                    vel.x += (Math.random() - 0.5) * 0.002;
+                    vel.z += (Math.random() - 0.5) * 0.002;
 
                     // 速度減衰（空気抵抗）
-                    vel.x *= 0.985;
-                    vel.y *= 0.985;
-                    vel.z *= 0.985;
+                    vel.x *= 0.98;
+                    vel.y *= 0.98;
+                    vel.z *= 0.98;
                 } else {
                     // 山の一部：元の位置へ戻る／維持する
                     const dx = orig.x - positions[i3];
@@ -306,6 +306,7 @@
         // ========================================
         function animate() {
             requestAnimationFrame(animate);
+            controls.update(); // OrbitControlsの更新
             updateParticles();
             renderer.render(scene, camera);
         }
