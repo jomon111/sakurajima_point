@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>桜島の記憶</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        body {
+            background: #000;
+            font-family: sans-serif;
+        }
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #permission-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #permission-overlay.hidden {
+            display: none;
+        }
+        #permission-btn {
+            padding: 20px 40px;
+            font-size: 18px;
+            background: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #permission-text {
+            color: #fff;
+            margin-bottom: 30px;
+            text-align: center;
+            padding: 0 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div id="permission-overlay">
+        <div id="permission-text">
+            モーションセンサーへのアクセスを<br>許可してください
+        </div>
+        <button id="permission-btn">開始</button>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ========================================
+        // グローバル変数
+        // ========================================
+        let scene, camera, renderer, particles;
+        let isWalking = false;
+        let isStill = true;
+        let stillTimer = 0;
+        const STILL_THRESHOLD = 3000; // 3秒
+
+        // センサー関連
+        let lastAccel = { x: 0, y: 0, z: 0 };
+        const ACCEL_THRESHOLD = 0.3; // 歩行判定の閾値（調整可能）
+
+        // パーティクル設定
+        const PARTICLE_COUNT = 30000;
+        const originalPositions = [];
+        const velocities = [];
+        const baseOpacity = 0.8;
+
+        // 状態管理
+        let targetOpacity = baseOpacity;
+        let currentOpacity = baseOpacity;
+        let disperseAmount = 0; // 拡散度合い (0-1)
+
+        // ========================================
+        // three.js初期化
+        // ========================================
+        function init() {
+            // シーン
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a0a);
+
+            // カメラ
+            camera = new THREE.PerspectiveCamera(
+                60,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(0, 3, 8);
+            camera.lookAt(0, 2, 0);
+
+            // レンダラー
+            const canvas = document.getElementById('canvas');
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            // 点群生成
+            createMountainPoints();
+
+            // リサイズ対応
+            window.addEventListener('resize', onResize);
+        }
+
+        // ========================================
+        // 山型の点群生成（円錐形）
+        // ========================================
+        function createMountainPoints() {
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(PARTICLE_COUNT * 3);
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                // 円錐形の山を生成
+                const t = Math.random();
+                const height = Math.random() * 4; // 高さ 0-4
+                const radius = (1 - height / 4) * 2.5; // 下が広く上が狭い
+
+                const theta = Math.random() * Math.PI * 2;
+                const r = Math.sqrt(Math.random()) * radius;
+
+                const x = r * Math.cos(theta);
+                const y = height;
+                const z = r * Math.sin(theta);
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+
+                // オリジナル位置を保存
+                originalPositions.push({ x, y, z });
+
+                // 速度初期化
+                velocities.push({ x: 0, y: 0, z: 0 });
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            // マテリアル
+            const material = new THREE.PointsMaterial({
+                color: 0xc0c0c0,
+                size: 0.03,
+                transparent: true,
+                opacity: baseOpacity,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+
+        // ========================================
+        // センサー初期化
+        // ========================================
+        function initSensors() {
+            if (typeof DeviceMotionEvent !== 'undefined') {
+                window.addEventListener('devicemotion', handleMotion);
+            } else {
+                console.warn('DeviceMotionEvent not supported');
+            }
+        }
+
+        // ========================================
+        // 加速度センサー処理
+        // ========================================
+        function handleMotion(event) {
+            if (!event.accelerationIncludingGravity) return;
+
+            const accel = event.accelerationIncludingGravity;
+            const dx = Math.abs(accel.x - lastAccel.x);
+            const dy = Math.abs(accel.y - lastAccel.y);
+            const dz = Math.abs(accel.z - lastAccel.z);
+            const totalChange = dx + dy + dz;
+
+            // 歩行判定
+            if (totalChange > ACCEL_THRESHOLD) {
+                isWalking = true;
+                isStill = false;
+                stillTimer = 0;
+            } else {
+                isWalking = false;
+                stillTimer += 16; // 約60fps想定
+
+                // 3秒以上静止したらstill状態
+                if (stillTimer >= STILL_THRESHOLD) {
+                    isStill = true;
+                }
+            }
+
+            lastAccel = { x: accel.x, y: accel.y, z: accel.z };
+        }
+
+        // ========================================
+        // パーティクル更新
+        // ========================================
+        function updateParticles() {
+            const positions = particles.geometry.attributes.position.array;
+
+            // 目標の拡散度と透明度
+            if (isWalking) {
+                disperseAmount = Math.min(disperseAmount + 0.005, 1.0);
+                targetOpacity = 0.1;
+            } else if (isStill) {
+                disperseAmount = Math.max(disperseAmount - 0.01, 0.0);
+                targetOpacity = baseOpacity;
+            }
+
+            // 透明度を滑らかに変化
+            currentOpacity += (targetOpacity - currentOpacity) * 0.05;
+            particles.material.opacity = currentOpacity;
+
+            // 各パーティクルの位置更新
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const i3 = i * 3;
+                const orig = originalPositions[i];
+                const vel = velocities[i];
+
+                if (isWalking) {
+                    // 上方向へ拡散（噴煙イメージ）
+                    vel.y += 0.002 * disperseAmount;
+                    vel.x += (Math.random() - 0.5) * 0.001 * disperseAmount;
+                    vel.z += (Math.random() - 0.5) * 0.001 * disperseAmount;
+                } else {
+                    // 元の位置へ戻る
+                    const dx = orig.x - positions[i3];
+                    const dy = orig.y - positions[i3 + 1];
+                    const dz = orig.z - positions[i3 + 2];
+
+                    vel.x = dx * 0.02;
+                    vel.y = dy * 0.02;
+                    vel.z = dz * 0.02;
+                }
+
+                // 速度減衰
+                vel.x *= 0.98;
+                vel.y *= 0.98;
+                vel.z *= 0.98;
+
+                // 位置更新
+                positions[i3] += vel.x;
+                positions[i3 + 1] += vel.y;
+                positions[i3 + 2] += vel.z;
+            }
+
+            particles.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // ========================================
+        // アニメーションループ
+        // ========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            updateParticles();
+            renderer.render(scene, camera);
+        }
+
+        // ========================================
+        // リサイズ対応
+        // ========================================
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ========================================
+        // 許可ボタン処理
+        // ========================================
+        document.getElementById('permission-btn').addEventListener('click', async () => {
+            // iOS 13+ のDeviceMotionEvent許可
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission === 'granted') {
+                        initSensors();
+                    }
+                } catch (error) {
+                    console.error('Permission denied', error);
+                }
+            } else {
+                // Android等
+                initSensors();
+            }
+
+            // オーバーレイを非表示
+            document.getElementById('permission-overlay').classList.add('hidden');
+        });
+
+        // ========================================
+        // 起動
+        // ========================================
+        init();
+        animate();
+    </script>
+</body>
+</html>
