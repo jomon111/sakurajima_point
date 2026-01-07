@@ -120,8 +120,8 @@
                 0.1,
                 1000
             );
-            camera.position.set(0, 3, 8);
-            camera.lookAt(0, 2, 0);
+            camera.position.set(0, 1.5, 8);
+            camera.lookAt(0, 1, 0);
 
             // レンダラー
             const canvas = document.getElementById('canvas');
@@ -345,9 +345,9 @@
                     vel.z += (Math.random() - 0.5) * 0.02;
 
                     // 速度減衰（徐々に静止する）
-                    vel.x *= 0.6;
-                    vel.y *= 0.6;
-                    vel.z *= 0.6;
+                    vel.x *= 0.96;
+                    vel.y *= 0.96;
+                    vel.z *= 0.96;
                 } else {
                     // 山の一部：元の位置へ戻る／維持する
                     const dx = orig.x - positions[i3];
