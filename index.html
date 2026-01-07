@@ -338,14 +338,14 @@
                 if (state === 1) {
                     // 放出中：火山灰のように浮遊しながら横に流れる
                     // ランダムに揺らぎながら漂う
-                    vel.x += (Math.random() - 0.5) * 0.002;
-                    vel.y += (Math.random() - 0.5) * 0.001; // 上下にもゆらぎ
-                    vel.z += (Math.random() - 0.5) * 0.002;
+                    vel.x += (Math.random() - 0.5) * 0.02;
+                    vel.y += (Math.random() - 0.5) * 0.02; // 上下にもゆらぎ
+                    vel.z += (Math.random() - 0.5) * 0.02;
 
                     // 速度減衰（徐々に静止する）
-                    vel.x *= 0.96;
-                    vel.y *= 0.96;
-                    vel.z *= 0.96;
+                    vel.x *= 0.6;
+                    vel.y *= 0.6;
+                    vel.z *= 0.6;
                 } else {
                     // 山の一部：元の位置へ戻る／維持する
                     const dx = orig.x - positions[i3];
