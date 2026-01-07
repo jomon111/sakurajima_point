@@ -74,6 +74,14 @@
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+
+        // ========================================
+        // 設定：外部点群ファイルのパス
+        // ========================================
+        // null の場合は、デフォルトの円錐形の山を生成
+        // PLYファイルを使う場合は、ファイルパスを指定
+        const POINT_CLOUD_FILE = null; // 例: './sakurajima.ply'
 
         // ========================================
         // グローバル変数
@@ -120,7 +128,11 @@
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
             // 点群生成
-            createMountainPoints();
+            if (POINT_CLOUD_FILE) {
+                loadPointCloudFromFile(POINT_CLOUD_FILE);
+            } else {
+                createMountainPoints();
+            }
 
             // OrbitControls（3D回転操作）
             controls = new OrbitControls(camera, canvas);
@@ -134,7 +146,55 @@
         }
 
         // ========================================
-        // 山型の点群生成（円錐形）
+        // 外部ファイルから点群を読み込み
+        // ========================================
+        function loadPointCloudFromFile(filePath) {
+            const loader = new PLYLoader();
+            loader.load(
+                filePath,
+                function (geometry) {
+                    // ジオメトリから位置情報を取得
+                    const positions = geometry.getAttribute('position');
+                    const count = positions.count;
+
+                    console.log(`Loaded ${count} points from ${filePath}`);
+
+                    // オリジナル位置を保存
+                    for (let i = 0; i < count; i++) {
+                        const x = positions.getX(i);
+                        const y = positions.getY(i);
+                        const z = positions.getZ(i);
+                        originalPositions.push({ x, y, z });
+                        velocities.push({ x: 0, y: 0, z: 0 });
+                        particleStates.push(0);
+                    }
+
+                    // マテリアル（火山灰イメージ）
+                    const material = new THREE.PointsMaterial({
+                        color: 0xffffff,
+                        size: 0.04,
+                        transparent: true,
+                        opacity: 0.9,
+                        depthWrite: false,
+                        blending: THREE.AdditiveBlending
+                    });
+
+                    particles = new THREE.Points(geometry, material);
+                    scene.add(particles);
+                },
+                function (xhr) {
+                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                },
+                function (error) {
+                    console.error('Error loading point cloud:', error);
+                    // エラー時はデフォルトの山を生成
+                    createMountainPoints();
+                }
+            );
+        }
+
+        // ========================================
+        // 山型の点群生成（円錐形）- デフォルト
         // ========================================
         function createMountainPoints() {
             const geometry = new THREE.BufferGeometry();
@@ -228,13 +288,20 @@
         // パーティクル更新
         // ========================================
         function updateParticles() {
-            const positions = particles.geometry.attributes.position.array;
+            if (!particles || !particles.geometry) return;
+
+            const positionsAttr = particles.geometry.getAttribute('position');
+            if (!positionsAttr) return;
+
+            const positions = positionsAttr.array;
+            const particleCount = originalPositions.length;
 
             // 歩行中：ランダムに点群を放出状態にする
             if (isWalking) {
                 // 毎フレーム、ランダムに数点を放出状態に変更
-                for (let j = 0; j < RELEASE_RATE; j++) {
-                    const randomIndex = Math.floor(Math.random() * PARTICLE_COUNT);
+                const releaseCount = Math.min(RELEASE_RATE, particleCount);
+                for (let j = 0; j < releaseCount; j++) {
+                    const randomIndex = Math.floor(Math.random() * particleCount);
                     if (particleStates[randomIndex] === 0) {
                         particleStates[randomIndex] = 1; // 放出状態にする
 
@@ -256,31 +323,29 @@
                 }
             } else if (isStill) {
                 // 静止中：すべての点を山の一部に戻す
-                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                for (let i = 0; i < particleCount; i++) {
                     particleStates[i] = 0;
                 }
             }
 
             // 各パーティクルの位置更新
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
+            for (let i = 0; i < particleCount; i++) {
                 const i3 = i * 3;
                 const orig = originalPositions[i];
                 const vel = velocities[i];
                 const state = particleStates[i];
 
                 if (state === 1) {
-                    // 放出中：火山灰のように上昇しながら横に流れる
-                    // 重力に逆らって上昇（徐々に減速）
-                    vel.y -= 0.0008; // 重力の影響（緩やか）
-
-                    // 横方向に風で流される感じ
+                    // 放出中：火山灰のように浮遊しながら横に流れる
+                    // ランダムに揺らぎながら漂う
                     vel.x += (Math.random() - 0.5) * 0.002;
+                    vel.y += (Math.random() - 0.5) * 0.001; // 上下にもゆらぎ
                     vel.z += (Math.random() - 0.5) * 0.002;
 
-                    // 速度減衰（空気抵抗）
-                    vel.x *= 0.98;
-                    vel.y *= 0.98;
-                    vel.z *= 0.98;
+                    // 速度減衰（徐々に静止する）
+                    vel.x *= 0.96;
+                    vel.y *= 0.96;
+                    vel.z *= 0.96;
                 } else {
                     // 山の一部：元の位置へ戻る／維持する
                     const dx = orig.x - positions[i3];
@@ -298,7 +363,7 @@
                 positions[i3 + 2] += vel.z;
             }
 
-            particles.geometry.attributes.position.needsUpdate = true;
+            positionsAttr.needsUpdate = true;
         }
 
         // ========================================
