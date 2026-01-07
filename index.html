@@ -168,12 +168,10 @@
 
             // マテリアル
             const material = new THREE.PointsMaterial({
-                color: 0xc0c0c0,
+                color: 0xffffff,
                 size: 0.03,
-                transparent: true,
-                opacity: baseOpacity,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
+                transparent: false,
+                depthWrite: false
             });
 
             particles = new THREE.Points(geometry, material);
@@ -235,25 +233,35 @@
                     if (particleStates[randomIndex] === 0) {
                         particleStates[randomIndex] = 1; // 放出状態にする
 
-                        // 放出時の初速度を与える（上方向メイン）
+                        // 放出時の初速度を与える（全方向に拡散・噴火イメージ）
                         const vel = velocities[randomIndex];
-                        vel.y = 0.05 + Math.random() * 0.05; // 上向き
-                        vel.x = (Math.random() - 0.5) * 0.02;
-                        vel.z = (Math.random() - 0.5) * 0.02;
+                        const i3 = randomIndex * 3;
+
+                        // 現在位置を取得
+                        const px = positions[i3];
+                        const py = positions[i3 + 1];
+                        const pz = positions[i3 + 2];
+
+                        // 山の中心からの方向ベクトル
+                        const centerY = 2.0; // 山の中心高さ
+                        const dx = px;
+                        const dy = py - centerY;
+                        const dz = pz;
+                        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+
+                        // 放射状に拡散（外側へ）
+                        const spreadPower = 0.03 + Math.random() * 0.03;
+                        vel.x = (dx / dist) * spreadPower;
+                        vel.y = (dy / dist) * spreadPower + 0.02; // 少し上方向にバイアス
+                        vel.z = (dz / dist) * spreadPower;
                     }
                 }
-                targetOpacity = 0.1;
             } else if (isStill) {
                 // 静止中：すべての点を山の一部に戻す
                 for (let i = 0; i < PARTICLE_COUNT; i++) {
                     particleStates[i] = 0;
                 }
-                targetOpacity = baseOpacity;
             }
-
-            // 透明度を滑らかに変化
-            currentOpacity += (targetOpacity - currentOpacity) * 0.05;
-            particles.material.opacity = currentOpacity;
 
             // 各パーティクルの位置更新
             for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -263,15 +271,16 @@
                 const state = particleStates[i];
 
                 if (state === 1) {
-                    // 放出中：上方向へ拡散し続ける
-                    vel.y += 0.001; // 上向き加速（重力に逆らう）
-                    vel.x += (Math.random() - 0.5) * 0.002;
-                    vel.z += (Math.random() - 0.5) * 0.002;
+                    // 放出中：慣性で拡散し続ける（噴火のふわっと感）
+                    // ランダムな微小変化を加える
+                    vel.x += (Math.random() - 0.5) * 0.001;
+                    vel.y += (Math.random() - 0.5) * 0.001;
+                    vel.z += (Math.random() - 0.5) * 0.001;
 
                     // 速度減衰（空気抵抗）
-                    vel.x *= 0.99;
-                    vel.y *= 0.99;
-                    vel.z *= 0.99;
+                    vel.x *= 0.985;
+                    vel.y *= 0.985;
+                    vel.z *= 0.985;
                 } else {
                     // 山の一部：元の位置へ戻る／維持する
                     const dx = orig.x - positions[i3];
