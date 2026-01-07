@@ -90,12 +90,14 @@
         const PARTICLE_COUNT = 30000;
         const originalPositions = [];
         const velocities = [];
+        const particleStates = []; // 各パーティクルの状態（0: 山の一部, 1: 放出中）
         const baseOpacity = 0.8;
 
         // 状態管理
         let targetOpacity = baseOpacity;
         let currentOpacity = baseOpacity;
         let disperseAmount = 0; // 拡散度合い (0-1)
+        const RELEASE_RATE = 50; // 1フレームあたりランダムに放出される点の数
 
         // ========================================
         // three.js初期化
@@ -157,6 +159,9 @@
 
                 // 速度初期化
                 velocities.push({ x: 0, y: 0, z: 0 });
+
+                // 状態初期化（0: 山の一部）
+                particleStates.push(0);
             }
 
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -222,12 +227,27 @@
         function updateParticles() {
             const positions = particles.geometry.attributes.position.array;
 
-            // 目標の拡散度と透明度
+            // 歩行中：ランダムに点群を放出状態にする
             if (isWalking) {
-                disperseAmount = Math.min(disperseAmount + 0.005, 1.0);
+                // 毎フレーム、ランダムに数点を放出状態に変更
+                for (let j = 0; j < RELEASE_RATE; j++) {
+                    const randomIndex = Math.floor(Math.random() * PARTICLE_COUNT);
+                    if (particleStates[randomIndex] === 0) {
+                        particleStates[randomIndex] = 1; // 放出状態にする
+
+                        // 放出時の初速度を与える（上方向メイン）
+                        const vel = velocities[randomIndex];
+                        vel.y = 0.05 + Math.random() * 0.05; // 上向き
+                        vel.x = (Math.random() - 0.5) * 0.02;
+                        vel.z = (Math.random() - 0.5) * 0.02;
+                    }
+                }
                 targetOpacity = 0.1;
             } else if (isStill) {
-                disperseAmount = Math.max(disperseAmount - 0.01, 0.0);
+                // 静止中：すべての点を山の一部に戻す
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    particleStates[i] = 0;
+                }
                 targetOpacity = baseOpacity;
             }
 
@@ -240,27 +260,28 @@
                 const i3 = i * 3;
                 const orig = originalPositions[i];
                 const vel = velocities[i];
+                const state = particleStates[i];
 
-                if (isWalking) {
-                    // 上方向へ拡散（噴煙イメージ）
-                    vel.y += 0.002 * disperseAmount;
-                    vel.x += (Math.random() - 0.5) * 0.001 * disperseAmount;
-                    vel.z += (Math.random() - 0.5) * 0.001 * disperseAmount;
+                if (state === 1) {
+                    // 放出中：上方向へ拡散し続ける
+                    vel.y += 0.001; // 上向き加速（重力に逆らう）
+                    vel.x += (Math.random() - 0.5) * 0.002;
+                    vel.z += (Math.random() - 0.5) * 0.002;
+
+                    // 速度減衰（空気抵抗）
+                    vel.x *= 0.99;
+                    vel.y *= 0.99;
+                    vel.z *= 0.99;
                 } else {
-                    // 元の位置へ戻る
+                    // 山の一部：元の位置へ戻る／維持する
                     const dx = orig.x - positions[i3];
                     const dy = orig.y - positions[i3 + 1];
                     const dz = orig.z - positions[i3 + 2];
 
-                    vel.x = dx * 0.02;
-                    vel.y = dy * 0.02;
-                    vel.z = dz * 0.02;
+                    vel.x = dx * 0.05;
+                    vel.y = dy * 0.05;
+                    vel.z = dz * 0.05;
                 }
-
-                // 速度減衰
-                vel.x *= 0.98;
-                vel.y *= 0.98;
-                vel.z *= 0.98;
 
                 // 位置更新
                 positions[i3] += vel.x;
