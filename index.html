@@ -340,9 +340,9 @@
                 if (state === 1) {
                     // 放出中：火山灰のように浮遊しながら横に流れる
                     // ランダムに揺らぎながら漂う
-                    vel.x += (Math.random() - 0.5) * 0.02;
-                    vel.y += (Math.random() - 0.5) * 0.02; // 上下にもゆらぎ
-                    vel.z += (Math.random() - 0.5) * 0.02;
+                    vel.x += (Math.random() - 0.5) * 0.002;
+                    vel.y += (Math.random() - 0.5) * 0.002; // 上下にもゆらぎ
+                    vel.z += (Math.random() - 0.5) * 0.002;
 
                     // 速度減衰（徐々に静止する）
                     vel.x *= 0.96;
