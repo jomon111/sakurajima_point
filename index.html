@@ -57,7 +57,7 @@
     <div id="permission-overlay">
         <div id="permission-text">
             歩くと、桜島は灰になり、<br>
-            立ち止まると、いつもの桜島に戻ります。<br><br>
+            少し立ち止まると、灰は桜島に戻ります。<br><br>
             モーションセンサーへのアクセスを<br>許可してください
         </div>
         <button id="permission-btn">開始</button>
@@ -99,7 +99,7 @@
 
         // センサー関連
         let lastAccel = { x: 0, y: 0, z: 0 };
-        const ACCEL_THRESHOLD = 0.3; // 歩行判定の閾値（調整可能）
+        const ACCEL_THRESHOLD = 1.0; // 歩行判定の閾値（調整可能）
 
         // パーティクル設定
         const originalPositions = [];
