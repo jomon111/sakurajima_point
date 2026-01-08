@@ -83,7 +83,7 @@
         // ========================================
         // null の場合は、デフォルトの円錐形の山を生成
         // PLYファイルを使う場合は、ファイルパスを指定
-        const POINT_CLOUD_FILE = null; // 例: './sakurajima.ply'
+        const POINT_CLOUD_FILE = './sakurajima.ply'; // 例: './sakurajima.ply'
 
         // ========================================
         // グローバル変数
@@ -92,14 +92,16 @@
         let isWalking = false;
         let isStill = true;
         let stillTimer = 0;
-        const STILL_THRESHOLD = 3000; // 3秒
+        const STILL_THRESHOLD = 5000; // 5秒
+        let autoRotateAngle = 0; // 自動回転用の角度
+        let userInteracting = false; // ユーザー操作中フラグ
+        let interactionTimeout = null; // 操作終了検出用タイマー
 
         // センサー関連
         let lastAccel = { x: 0, y: 0, z: 0 };
         const ACCEL_THRESHOLD = 0.3; // 歩行判定の閾値（調整可能）
 
         // パーティクル設定
-        const PARTICLE_COUNT = 30000;
         const originalPositions = [];
         const velocities = [];
         const particleStates = []; // 各パーティクルの状態（0: 山の一部, 1: 放出中）
@@ -113,14 +115,14 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0a0a0a);
 
-            // カメラ
+            // カメラ（FOVを75度に拡大してスマホで見やすく）
             camera = new THREE.PerspectiveCamera(
-                60,
+                75,
                 window.innerWidth / window.innerHeight,
                 0.1,
                 1000
             );
-            camera.position.set(0, 1.5, 8);
+            camera.position.set(8, 3, 0);
             camera.lookAt(0, 1, 0);
 
             // レンダラー
@@ -130,11 +132,7 @@
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
             // 点群生成
-            if (POINT_CLOUD_FILE) {
-                loadPointCloudFromFile(POINT_CLOUD_FILE);
-            } else {
-                createMountainPoints();
-            }
+            loadPointCloudFromFile(POINT_CLOUD_FILE);
 
             // OrbitControls（3D回転操作）
             controls = new OrbitControls(camera, canvas);
@@ -142,6 +140,26 @@
             controls.dampingFactor = 0.05;
             controls.enableZoom = true;
             controls.enablePan = false;
+            controls.minDistance = 5;
+            controls.maxDistance = 15;
+
+            // ユーザー操作開始時のイベント
+            controls.addEventListener('start', function() {
+                userInteracting = true;
+                if (interactionTimeout) {
+                    clearTimeout(interactionTimeout);
+                }
+            });
+
+            // ユーザー操作終了時のイベント（2秒後に自動回転再開）
+            controls.addEventListener('end', function() {
+                if (interactionTimeout) {
+                    clearTimeout(interactionTimeout);
+                }
+                interactionTimeout = setTimeout(function() {
+                    userInteracting = false;
+                }, 2000);
+            });
 
             // リサイズ対応
             window.addEventListener('resize', onResize);
@@ -159,90 +177,57 @@
                     const positions = geometry.getAttribute('position');
                     const count = positions.count;
 
-                    console.log(`Loaded ${count} points from ${filePath}`);
+                    // バウンディングボックスを計算して中心とスケールを取得
+                    geometry.computeBoundingBox();
+                    const bbox = geometry.boundingBox;
+                    const center = new THREE.Vector3();
+                    bbox.getCenter(center);
+                    const size = new THREE.Vector3();
+                    bbox.getSize(size);
 
-                    // オリジナル位置を保存
+                    // 点群を中心に移動してスケール調整
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const scale = 4.0 / maxDim; // 高さ4に正規化（デフォルトの山と同じ）
+
+                    // オリジナル位置を保存（中心化＆スケール済み）
+                    // Z軸を高さにするため、Y軸とZ軸を入れ替え
                     for (let i = 0; i < count; i++) {
-                        const x = positions.getX(i);
-                        const y = positions.getY(i);
-                        const z = positions.getZ(i);
+                        const x = (positions.getX(i) - center.x) * scale;
+                        const y = (positions.getZ(i) - center.z) * scale; // Z→Y
+                        const z = (positions.getY(i) - center.y) * scale; // Y→Z
+
+                        positions.setXYZ(i, x, y, z);
                         originalPositions.push({ x, y, z });
                         velocities.push({ x: 0, y: 0, z: 0 });
                         particleStates.push(0);
                     }
 
+                    positions.needsUpdate = true;
+
+                    // バウンディングボックスを再計算
+                    geometry.computeBoundingBox();
+
                     // マテリアル（火山灰イメージ）
                     const material = new THREE.PointsMaterial({
                         color: 0xffffff,
-                        size: 0.04,
+                        size: 0.01,
+                        sizeAttenuation: true,
                         transparent: true,
-                        opacity: 0.9,
+                        opacity: 0.90,
                         depthWrite: false,
+                        depthTest: true,
                         blending: THREE.AdditiveBlending
                     });
 
                     particles = new THREE.Points(geometry, material);
+                    particles.frustumCulled = false; // フラスタムカリングを無効化
                     scene.add(particles);
                 },
-                function (xhr) {
-                    console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-                },
+                undefined,
                 function (error) {
-                    console.error('Error loading point cloud:', error);
-                    // エラー時はデフォルトの山を生成
-                    createMountainPoints();
+                    console.error('Failed to load point cloud file');
                 }
             );
-        }
-
-        // ========================================
-        // 山型の点群生成（円錐形）- デフォルト
-        // ========================================
-        function createMountainPoints() {
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(PARTICLE_COUNT * 3);
-
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                // 円錐形の山を生成
-                const t = Math.random();
-                const height = Math.random() * 4; // 高さ 0-4
-                const radius = (1 - height / 4) * 2.5; // 下が広く上が狭い
-
-                const theta = Math.random() * Math.PI * 2;
-                const r = Math.sqrt(Math.random()) * radius;
-
-                const x = r * Math.cos(theta);
-                const y = height;
-                const z = r * Math.sin(theta);
-
-                positions[i * 3] = x;
-                positions[i * 3 + 1] = y;
-                positions[i * 3 + 2] = z;
-
-                // オリジナル位置を保存
-                originalPositions.push({ x, y, z });
-
-                // 速度初期化
-                velocities.push({ x: 0, y: 0, z: 0 });
-
-                // 状態初期化（0: 山の一部）
-                particleStates.push(0);
-            }
-
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-            // マテリアル（火山灰イメージ）
-            const material = new THREE.PointsMaterial({
-                color: 0xffffff,
-                size: 0.04,
-                transparent: true,
-                opacity: 0.9,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            });
-
-            particles = new THREE.Points(geometry, material);
-            scene.add(particles);
         }
 
         // ========================================
@@ -277,7 +262,7 @@
                 isWalking = false;
                 stillTimer += 16; // 約60fps想定
 
-                // 3秒以上静止したらstill状態
+                // 5秒以上静止したらstill状態
                 if (stillTimer >= STILL_THRESHOLD) {
                     isStill = true;
                 }
@@ -373,6 +358,19 @@
         // ========================================
         function animate() {
             requestAnimationFrame(animate);
+
+            // ユーザーが操作していない場合のみ自動回転
+            if (!userInteracting) {
+                autoRotateAngle += 0.002; // 回転速度
+                const radius = Math.sqrt(
+                    camera.position.x * camera.position.x +
+                    camera.position.z * camera.position.z
+                );
+                camera.position.x = Math.cos(autoRotateAngle) * radius;
+                camera.position.z = Math.sin(autoRotateAngle) * radius;
+                camera.lookAt(0, 1, 0);
+            }
+
             controls.update(); // OrbitControlsの更新
             updateParticles();
             renderer.render(scene, camera);
