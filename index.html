@@ -105,7 +105,7 @@
         const originalPositions = [];
         const velocities = [];
         const particleStates = []; // 各パーティクルの状態（0: 山の一部, 1: 放出中）
-        const RELEASE_RATE = 80; // 1フレームあたりランダムに放出される点の数（噴火は激しく）
+        const RELEASE_RATE = 160; // 1フレームあたりランダムに放出される点の数（噴火は激しく）
 
         // ========================================
         // three.js初期化
@@ -122,7 +122,7 @@
                 0.1,
                 1000
             );
-            camera.position.set(8, 3, 0);
+            camera.position.set(5, 3, 0);
             camera.lookAt(0, 1, 0);
 
             // レンダラー
@@ -140,8 +140,8 @@
             controls.dampingFactor = 0.05;
             controls.enableZoom = true;
             controls.enablePan = false;
-            controls.minDistance = 5;
-            controls.maxDistance = 15;
+            controls.minDistance = 2;
+            controls.maxDistance = 25;
 
             // ユーザー操作開始時のイベント
             controls.addEventListener('start', function() {
